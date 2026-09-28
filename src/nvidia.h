@@ -84,6 +84,11 @@ class NVIDIA {
 
     private:
         pid_t pid = getpid();
+#ifdef __linux__
+        // PCI bus number of this GPU, used to pick the matching NVAPI physical
+        // GPU handle when reading the core voltage.
+        unsigned int pci_bus_number = 0;
+#endif
         std::mutex metrics_mutex;
         gpu_metrics metrics;
         std::thread thread;

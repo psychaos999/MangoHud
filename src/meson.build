@@ -120,6 +120,13 @@ if is_unixy
     )
   endif
 
+  if host_machine.system() == 'linux'
+    # GPU core voltage via NVAPI: NVML does not expose it for consumer cards.
+    vklayer_files += files(
+      'nvapi_linux.cpp',
+    )
+  endif
+
   if get_option('with_xnvctrl').enabled()
 
     if not get_option('with_x11').enabled()

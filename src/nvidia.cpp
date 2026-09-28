@@ -8,6 +8,13 @@
 #include <chrono>
 #include "mesa/util/macros.h"
 
+#ifdef __linux__
+#include <cstdlib>
+#include <cstring>
+
+#include "nvapi_linux.h"
+#endif
+
 #if defined(HAVE_XNVCTRL) && defined(HAVE_X11)
 void NVIDIA::parse_token(const std::string& token, std::unordered_map<std::string, std::string>& options) {
     std::string param, value;
@@ -27,6 +34,19 @@ void NVIDIA::parse_token(const std::string& token, std::unordered_map<std::strin
 #endif
 
 NVIDIA::NVIDIA(const char* pciBusId) {
+#ifdef __linux__
+    // NVAPI addresses GPUs by physical handle, so remember which bus this
+    // instance is about ("0000:01:00.0" -> 0x01) to pick the matching one.
+    if (pciBusId) {
+        const char* first_colon = strchr(pciBusId, ':');
+        if (first_colon)
+            pci_bus_number = static_cast<unsigned int>(strtoul(first_colon + 1, nullptr, 16));
+    }
+
+    if (!nvapi_linux::available())
+        SPDLOG_DEBUG("NVAPI is unavailable; the GPU voltage will not be reported");
+#endif
+
 #ifdef HAVE_NVML
     if (nvml && nvml->IsLoaded()) {
         nvmlReturn_t result = nvml->nvmlInit_v2();
@@ -127,6 +147,15 @@ void NVIDIA::get_instant_metrics_nvml(struct gpu_metrics *metrics, struct overla
             metrics->powerUsage = power / 1000;
             metrics->powerLimit = limit / 1000;
         }
+
+#ifdef __linux__
+        // NVML has no voltage on consumer GeForce cards, so ask NVAPI.
+        if (params->enabled[OVERLAY_PARAM_ENABLED_gpu_voltage] || (logger && logger->is_active())) {
+            int voltage_mv = 0;
+            if (nvapi_linux::get_core_voltage_mv(pci_bus_number, voltage_mv))
+                metrics->voltage = voltage_mv;
+        }
+#endif
 
         if (params->enabled[OVERLAY_PARAM_ENABLED_throttling_status]) {
             unsigned long long nvml_throttle_reasons;
@@ -253,6 +282,7 @@ void NVIDIA::get_samples_and_copy() {
         GPU_UPDATE_METRIC_AVERAGE(load);
         GPU_UPDATE_METRIC_AVERAGE_FLOAT(powerUsage);
         GPU_UPDATE_METRIC_MAX(powerLimit);
+        GPU_UPDATE_METRIC_AVERAGE(voltage);
         GPU_UPDATE_METRIC_AVERAGE(CoreClock);
         GPU_UPDATE_METRIC_AVERAGE(MemClock);
 
